@@ -23,14 +23,14 @@ BUCKET_NAME = os.getenv('AWS_BUCKET_NAME')
 REGION = os.getenv('AWS_REGION')
 
 if not AWS_ACCESS_KEY or not AWS_SECRET_KEY:
-    raise ValueError("❌ Error: AWS Credentials not found")
+    raise ValueError("Error: AWS Credentials not found")
 
 def read_from_s3(filename):
     """
     Connects to AWS S3, downloads the CSV, and loads it into Pandas.
     """
     try:
-        print(f"☁️ Connecting to AWS S3 to fetch {filename}...")
+        print(f"Connecting to AWS S3 to fetch {filename}...")
         s3 = boto3.client(
             's3', 
             aws_access_key_id=AWS_ACCESS_KEY, 
@@ -43,8 +43,8 @@ def read_from_s3(filename):
         return pd.read_csv(StringIO(csv_string))
         
     except Exception as e:
-        print(f"❌ Error fetching from S3: {e}")
-        print("➡️ Falling back to local file...")
+        print(f"Error fetching from S3: {e}")
+        print("Falling back to local file...")
         return pd.read_csv(filename) 
 
 

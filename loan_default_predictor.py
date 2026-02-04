@@ -1,17 +1,57 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import boto3
+from dotenv import load_dotenv
+from io import StringIO
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+import os
 from carousel import Carousel
 
 
-train_df = pd.read_csv("credit_risk_train.csv")
-test_df = pd.read_csv("credit_risk_test.csv")
-request_df = pd.read_csv("loan_requests.csv")
+
+load_dotenv()
+
+
+AWS_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY_ID')
+AWS_SECRET_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+BUCKET_NAME = os.getenv('AWS_BUCKET_NAME')
+REGION = os.getenv('AWS_REGION')
+
+if not AWS_ACCESS_KEY or not AWS_SECRET_KEY:
+    raise ValueError("❌ Error: AWS Credentials not found")
+
+def read_from_s3(filename):
+    """
+    Connects to AWS S3, downloads the CSV, and loads it into Pandas.
+    """
+    try:
+        print(f"☁️ Connecting to AWS S3 to fetch {filename}...")
+        s3 = boto3.client(
+            's3', 
+            aws_access_key_id=AWS_ACCESS_KEY, 
+            aws_secret_access_key=AWS_SECRET_KEY, 
+            region_name=REGION
+        )
+        
+        obj = s3.get_object(Bucket=BUCKET_NAME, Key=filename)
+        csv_string = obj['Body'].read().decode('utf-8')
+        return pd.read_csv(StringIO(csv_string))
+        
+    except Exception as e:
+        print(f"❌ Error fetching from S3: {e}")
+        print("➡️ Falling back to local file...")
+        return pd.read_csv(filename) 
+
+
+print("Initializing Data Ingestion Layer...")
+train_df = read_from_s3("credit_risk_train.csv")
+test_df = read_from_s3("credit_risk_test.csv")
+request_df = read_from_s3("loan_requests.csv")
 
 #Feature SetuP
 target = 'loan_status'

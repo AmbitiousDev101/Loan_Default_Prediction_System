@@ -11,6 +11,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 from carousel import Carousel
+from database_manager import LoanDatabase
 
 
 
@@ -23,7 +24,7 @@ BUCKET_NAME = os.getenv('AWS_BUCKET_NAME')
 REGION = os.getenv('AWS_REGION')
 
 if not AWS_ACCESS_KEY or not AWS_SECRET_KEY:
-    raise ValueError("Error: AWS Credentials not found")
+    print("Warning: AWS Credentials not found. Model will attempt to use local data files.")
 
 def read_from_s3(filename):
     """
@@ -52,6 +53,10 @@ print("Initializing Data Ingestion Layer...")
 train_df = read_from_s3("credit_risk_train.csv")
 test_df = read_from_s3("credit_risk_test.csv")
 request_df = read_from_s3("loan_requests.csv")
+
+# SQL Persistence Layer Initialization
+db = LoanDatabase()
+db.sync_csv_to_db(request_df) # Sync CSV source to Database
 
 #Feature SetuP
 target = 'loan_status'
@@ -111,35 +116,91 @@ def plot_homeowner_pie(df):
 plot_age_distribution(train_df)
 plot_homeowner_pie(train_df)
 
-#Carousel Interface (For The Doubly Linked List)
-def run_carousel_interface(request_df):
-    df = request_df.copy()
-    ids = df.pop('borrower') if 'borrower' in df.columns else [f"Borrower {i+1}" for i in range(len(df))]
+#Carousel Interface (For The Doubly Linked List & SQL Querying)
+def run_carousel_interface():
+    # Initial load from Database
+    current_df = db.get_applications()
+    
+    def build_carousel(df):
+        if df.empty:
+            print("\n[!] No records found for this criteria.")
+            return None
+        
+        # Prepare data for prediction (drop metadata like 'borrower' and 'id')
+        predict_ready_df = df.drop(columns=['borrower', 'id', 'created_at'])
+        preds = model.predict(predict_ready_df)
+        
+        carousel = Carousel()
+        for i, row in df.iterrows():
+            data = row.to_dict()
+            data['prediction'] = "Reject" if preds[i] == 1 else "Accept"
+            carousel.add(data)
+        return carousel
 
-    preds = model.predict(df)
-    carousel = Carousel()
-
-    for i, row in request_df.iterrows():
-        data = row.to_dict()
-        data['prediction'] = "Reject" if preds[i] == 1 else "Accept"
-        data['borrower'] = ids[i]
-        carousel.add(data)
+    carousel = build_carousel(current_df)
 
     while True:
-        current = carousel.getCurrentData()
-        print("\n" + "-" * 40)
-        for k, v in current.items():
-            print(f"{k}: {v}")
-        print("-" * 40)
+        if carousel:
+            current = carousel.getCurrentData()
+            print("\n" + "=" * 45)
+            print(f" BORROWER: {current['borrower']} (ID: {current['id']})")
+            print("-" * 45)
+            for k, v in current.items():
+                if k not in ['borrower', 'id', 'prediction']:
+                    print(f"{k:.<25} {v}")
+            print("-" * 45)
+            print(f" MODEL DECISION: {current['prediction']}")
+            print("=" * 45)
+            
+            # Persist decision to SQL
+            db.record_decision(current['borrower'], current['prediction'])
         
-        choice = input("1 = Next | 2 = Previous | 0 = Quit: ")
-        if choice == '1':
+        print("\n[M]enu: 1.Next | 2.Prev | 3.Filter (SQL) | 4.Analytics | 0.Quit")
+        choice = input("Select an option: ")
+        
+        if choice == '1' and carousel:
             carousel.movePrevious()
-        elif choice == '2':
+        elif choice == '2' and carousel:
             carousel.moveNext()
+        elif choice == '3':
+            while True:
+                print("\n--- Safe SQL Filter Mode ---")
+                print("Columns: person_age, person_income, loan_amnt, loan_intent, loan_grade, person_home_ownership")
+                col = input("Enter Column (or ENTER to cancel): ").strip()
+                if not col:
+                    break
+                    
+                op = input("Enter Operator (>, <, =, >=, <=): ").strip()
+                val = input("Enter Value: ").strip()
+                
+                try:
+                    # Type casting for safety (numeric columns)
+                    if col in ['person_income', 'person_age', 'loan_amnt']:
+                        val = float(val)
+                    
+                    current_df = db.get_applications(col, op, val)
+                    carousel = build_carousel(current_df)
+                    break # Success, exit filter loop
+                except ValueError as ve:
+                    print(f"\n[!] Input Error: {ve}")
+                    print("Please try again.")
+                except Exception as e:
+                    print(f"\n[!] System Error: {e}")
+                    break
+        elif choice == '4':
+            print("\n--- Model Analytics (SQL Aggregations) ---")
+            stats = db.get_analytics()
+            print("\n[ Loans by Intent ]")
+            for intent, count in stats['by_intent']:
+                print(f" - {intent}: {count}")
+            print("\n[ Avg Loan Amount by Grade ]")
+            for grade, avg_amt in stats['avg_by_grade']:
+                print(f" - Grade {grade}: ${avg_amt:,.2f}")
+            input("\nPress ENTER to return to Carousel...")
         elif choice == '0':
             break
         else:
-            print("Invalid input.")
+            print("Invalid input or no data loaded.")
 
-run_carousel_interface(request_df)
+if __name__ == "__main__":
+    run_carousel_interface()

@@ -1,5 +1,31 @@
+# Python bytecode
 __pycache__/
 *.pyc
-*.db
-*.ipynb_checkpoints/
+*.pyo
+*.pyd
+
+# Environment variables (AWS Keys, etc.)
 .env
+
+# SQLite databases
+*.db
+!credit_risk_*.db # Optional: keep if you have a base DB you want to share
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Testing
+.pytest_cache/
+tests/__pycache__/
+
+# Scratch scripts
+test_db_logic.py
+
+# OS-specific
+.DS_Store
+Thumbs.db
